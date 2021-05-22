@@ -18,7 +18,7 @@ proc ::dasbrain::quakenet::need {what channel} {
 	if {$what eq {key}} {
 		set what invite
 	}
-	if {[copt get [::hexchat::getinfo network] $channel q-$what]} {
+	if {[copt get [::hexchat::getinfo network] $channel q-$what] eq {1}} {
 		::hexchat::command "RAW PRIVMSG Q@CServe.quakenet.org :$what $channel"
 		if {$what eq {invite}} {
 			::dasbrain::invitejoin::addjoin $channel
