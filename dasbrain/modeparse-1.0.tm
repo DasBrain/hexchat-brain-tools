@@ -7,7 +7,7 @@ namespace eval ::dasbrain::modeparse {
 		variable rawmode [::hexchat::hook_server MODE ::dasbrain::modeparse::parse]
 	}
 	
-	namespace export handler
+	namespace export handler ircsplit
 	if {![info exists handler]} {
 		variable handler [list]
 	}
