@@ -1,5 +1,7 @@
 package require hexchat
 
+package require dasbrain::isupport
+
 package provide dasbrain::modeparse 1.0
 
 namespace eval ::dasbrain::modeparse {
@@ -7,6 +9,7 @@ namespace eval ::dasbrain::modeparse {
 		variable rawmode [::hexchat::hook_server MODE ::dasbrain::modeparse::parse]
 	}
 	
+	namespace import -force ::dasbrain::isupport::ircsplit ::dasbrain::isupport::isupport
 	namespace export handler ircsplit
 	if {![info exists handler]} {
 		variable handler [list]
@@ -15,9 +18,7 @@ namespace eval ::dasbrain::modeparse {
 
 proc ::dasbrain::modeparse::parse {words words_eol} {
 
-	set cfields [::hexchat::list_fields channels]
-	set cinfo [lsearch -inline -index [lsearch $cfields id] [::hexchat::getlist channels] [::hexchat::prefs id]]
-	set chanmeta [split [lindex $cinfo [lsearch $cfields chantypes]] {}]
+	set chanmeta [isupport get CHANTYPES]
 
 	set line [ircsplit [lindex $words_eol 1]]
 	# :src MODE #channel +o target
@@ -29,10 +30,10 @@ proc ::dasbrain::modeparse::parse {words words_eol} {
 	set plusminus +
 	set from [lindex $line 0]
 	set args [lrange $line 4 end]
-	
 
-	set chanmodes [split [lindex $cinfo [lsearch $cfields chanmodes]] ,]
-	set nickmodes [split [lindex $cinfo [lsearch $cfields nickmodes]] {}]
+	set chanmodes [split [isupport get CHANMODES] ,]
+	set prefixes [isupport get PREFIX]
+	set nickmodes [split [string range $prefixes 1 [string first ) $prefixes]] {}]
 	
 	set A [split [lindex $chanmodes 0] {}]; # eIbq
 	set B [split [lindex $chanmodes 1] {}]; # k
@@ -83,21 +84,4 @@ proc ::dasbrain::modeparse::handler {cmd} {
 	if {$cmd ni $handler} {
 		lappend handler $cmd
 	}
-}
-
-proc ::dasbrain::modeparse::ircsplit {str} {
-	set res {}
-	if {[string index $str 0] eq ":"} {
-		lappend res [string range $str 1 [set first [string first " " $str]]-1]
-		set str [string range $str 1+$first end]
-	} else {
-		lappend res {}
-	}
-	if {[set pos [string first " :" $str]] != -1} {
-		lappend res {*}[split [string range $str 0 ${pos}-1]]
-		lappend res [string range $str 2+$pos end]
-	} else {
-		lappend res {*}[split $str]
-	}
-	return $res
 }
