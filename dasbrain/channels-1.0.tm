@@ -198,6 +198,7 @@ proc ::dasbrain::channels::KICK {word word_eol} {
 	set reason {}
 	lassign $line src - chan target reason
 	remuser $chan $target KICK $reason $src
+	return $::hexchat::EAT_NONE
 }
 
 proc ::dasbrain::channels::NICK {word word_eol} {
@@ -314,7 +315,17 @@ proc ::dasbrain::channels::353 {word word_eol} {
 }
 
 proc ::dasbrain::channels::ACCOUNT {word word_eol} {
-	
+	set line [ircsplit [lindex $word_eol 1]]
+	lassign line from - account
+	set nick [nuh2nick $from]
+	variable channels
+	set sid [::hexchat::prefs id]
+	dict for {chan info} [dict get $channels $sid] {
+		if {[dict exists $info users $nick]} {
+			dict set channels $sid $chan users $nick account $account
+			emit-userchg $chan [dict get $channels $sid $chan users $nick]
+		}
+	}
 	return $::hexchat::EAT_NONE
 }
 
@@ -326,7 +337,7 @@ proc ::dasbrain::channels::AWAY {word word_eol} {
 		set away 1
 		set away-reason [lindex $line 2]
 	}
-	set nick [nuh2nick $from]
+	set nick [nuh2nick [lindex $line 0]]
 	variable channels
 	set sid [::hexchat::prefs id]
 	dict for {chan info} [dict get $channels $sid] {
@@ -364,6 +375,7 @@ proc ::dasbrain::channels::CHGHOST {word word_eol} {
 proc ::dasbrain::channels::Disconnected {word} {
 	variable channels
 	dict unset channels [::hexchat::prefs id]
+	return ::hexchat::EAT_NONE
 }
 
 #>> :tulip.eu.ix.undernet.org 324 DasBrain #computertech +mtnRl 33

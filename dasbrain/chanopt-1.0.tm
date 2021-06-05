@@ -181,5 +181,5 @@ proc ::dasbrain::chanopt::cmd_nset {words words_eol} {
 }
 
 namespace eval :: {
-	namespace import -force ::dasbrain::chanopt::ccopt 
+	namespace import -force ::dasbrain::chanopt::ccopt ::dasbrain::chanopt::cnopt
 }
