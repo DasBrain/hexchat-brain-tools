@@ -24,7 +24,7 @@ proc ::dasbrain::automode::gotops {chan} {
 	foreach m [split $umodes {}] p [split $prefix {}] {
 		dict set mpmap $m $p
 	}
-	dict for {nick userrec} {
+	dict for {nick userrec} [::dasbrain::channels::userlist $chan] {
 		if {[dict exists $userrec caps automode]} {
 			foreach am [split [dict get $userrec caps automode] {}] {
 				if {![dict exists $mpmap $am]} {continue}
