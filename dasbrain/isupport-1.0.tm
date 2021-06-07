@@ -25,7 +25,7 @@ proc ::dasbrain::isupport::ircsplit {str} {
 		lappend res {*}[split [string range $str 0 ${pos}-1]]
 		lappend res [string range $str 2+$pos end]
 	} else {
-		lappend res {*}[split $str]
+		lappend res {*}[split [string trimright $str]]
 	}
 	return $res
 }
@@ -62,16 +62,41 @@ proc ::dasbrain::isupport::isset {key} {
 }
 
 apply {{} {
+	variable support
 	set origctx [::hexchat::getcontext]
 	set cfields [::hexchat::list_fields channels]
 	set ctxidx [lsearch $cfields context]
 	set typeidx [lsearch $cfields type]
 	set flagsidx [lsearch $cfields flags]
+	set chanmodesidx [lsearch $cfields chanmodes]
+	set chantypesidx [lsearch $cfields chantypes]
+	set maxmodesidx [lsearch $cfields maxmodes]
+	set channelidx [lsearch $cfields channel]
+	set nickmodesidx [lsearch $cfields nickmodes]
+	set nickprefixidx [lsearch $cfields nickprefixes]
+	set ididx [lsearch $cfields id]
 	foreach chan [::hexchat::getlist channels] {
 		if {[lindex $chan $typeidx] == 1 && ([lindex $chan $flagsidx] & 8) != 0} {
 			::hexchat::setcontext [lindex $chan $ctxidx]
+			set defaults {
+				CHANMODES chanmodesidx
+				CHANTYPES chantypesidx
+				NETWORK channelidx
+				MODES maxmodesidx
+			}
+			set defaults [dict map {k v} $defaults {lindex $chan [set $v]}]
+			dict set defaults PREFIX ([lindex $chan $nickmodesidx])[lindex $chan $nickprefixidx]
+			if {([lindex $chan $flagsidx] & 16) != 0} {
+				dict set defaults WHOX {}
+			}
+			set id [lindex $chan $ididx]
+			dict for {k v} $defaults {
+				if {![dict exists $support $id $k]} {
+					dict set support $id $k $v
+				}
+			}
 			::hexchat::command "QUOTE VERSION"
 		}
 	}
 	::hexchat::setcontext $origctx
-}}
+} ::dasbrain::isupport}

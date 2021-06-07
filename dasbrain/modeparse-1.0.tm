@@ -46,33 +46,39 @@ proc ::dasbrain::modeparse::parse {words words_eol} {
 			continue
 		} elseif {$c in $nickmodes} {
 			set take 1
+			set type prefix
 		} elseif {$c in $A} {
 			set take 1
+			set type A
 		} elseif {$c in $B} {
 			set take 1
+			set type B
 		} elseif {$c in $C} {
-			set take [string equal $c +]
+			set take [string equal $plusminus +]
+			set type B
 		} elseif {$c in $D} {
 			set take 0
+			set type D
 		} else {
 			::hexchat::print "Unknown Mode $c, assuming no parameter"
 			set take 0
+			set type Unknown
 		}
 		if {$take} {
 			set args [lassign $args arg]
-			process $from $channel $plusminus$c $arg
+			process $from $channel $plusminus$c $arg $type
 		} else {
-			process $from $channel $plusminus$c {}
+			process $from $channel $plusminus$c {} $type
 		}
 	}
 	return $::hexchat::EAT_NONE
 }
 
-proc ::dasbrain::modeparse::process {from channel mode arg} {
+proc ::dasbrain::modeparse::process {from channel mode arg type} {
 	variable handler
 	foreach h $handler {
 		try {
-			{*}$h $from $channel $mode $arg
+			{*}$h $from $channel $mode $arg $type
 		} on error {- opt} {
 			::hexchat::print "Mode $h $channel $mode $arg\t[dict get $opt -errorinfo]"
 		}

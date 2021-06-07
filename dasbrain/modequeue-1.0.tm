@@ -3,11 +3,11 @@ package require hexchat
 package provide dasbrain::modequeue 1.0
 
 namespace eval ::dasbrain::modequeue {
-	if {[info exists modequeue]} {
+	if {![info exists modequeue]} {
 		variable modequeue [dict create]
 	}
-	if {[info exists modetimer]} {
-		set modetimer {}
+	if {![info exists modetimer]} {
+		variable modetimer {}
 	}
 	
 	namespace export pushmode flushmodes
@@ -17,7 +17,7 @@ proc ::dasbrain::modequeue::pushmode {channel mode {target {}}} {
 	variable modequeue
 	variable modetimer
 	# TODO: validate
-	dict set [::hexchat::prefs id] $channel [list $mode $target] 1
+	dict set modequeue [::hexchat::prefs id] $channel [list $mode $target] 1
 	if {$modetimer eq {}} {
 		set modetimer [after 100 ::dasbrain::modequeue::flushmodes]
 	}
@@ -36,13 +36,13 @@ proc ::dasbrain::modequeue::flushmodes {} {
 			set ccinfo [lsearch -inline -index $ididx $cinfo $id]
 			set maxmodes [lindex $ccinfo $maxmodesidx]
 			::hexchat::setcontext [lindex $ccinfo $contextidx]
-			dict for {chan modes} {
+			dict for {chan modes} $cdict {
 				set modestr "MODE $chan "
 				set args {}
 				set pm {}
 				set modecount 0
-				dict for {mst -} $cdict {
-					lassign $msg modechange target
+				dict for {mst -} $modes {
+					lassign $mst modechange target
 					if {$pm ne [string index $modechange 0]} {
 						set pm [string index $modechange 0]
 						append modestr $pm

@@ -128,7 +128,7 @@ proc ::dasbrain::need::need {what channel} {
 	}
 }
 
-proc ::dasbrain::need::modechange {from channel mode arg} {
+proc ::dasbrain::need::modechange {from channel mode arg type} {
 	if {[string index $mode 0] ne {-}} {
 		return
 	}

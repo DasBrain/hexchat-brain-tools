@@ -78,13 +78,13 @@ proc ::dasbrain::chanopt::cset {network channel setting value} {
 proc ::dasbrain::chanopt::nset {network setting value} {
 	set opts [db onecolumn {SELECT setting FROM network_settings WHERE network == $network}]
 	variable network_settings
-	if {[dict exists $network_settings $setting default] = [dict get $network_settings $setting default] eq $value : $value eq {}} {
+	if {[dict exists $network_settings $setting default] ? [dict get $network_settings $setting default] eq $value : $value eq {}} {
 		dict unset opts $setting
 	} else {
 		dict set opts $setting $value
 	}
 	if {[dict size $opts] > 0} {
-		db eval {INSERT OR REPLACE INTO settings (network, setting) VALUES ($network, $opts)}
+		db eval {INSERT OR REPLACE INTO network_settings (network, setting) VALUES ($network, $opts)}
 	} else {
 		db eval {DELETE FROM settings WHERE network == $network}
 	}
@@ -170,7 +170,7 @@ proc ::dasbrain::chanopt::cmd_nset {words words_eol} {
 		if {[string index $arg 0] in {- +}} {
 			lappend opts [string range $arg 1 end] [lsearch {- +} [string index $arg 0]]
 		} else {
-			lappend $opts $arg
+			lappend opts $arg
 		}
 	}
 	foreach {k v} $opts {

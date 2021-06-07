@@ -10,14 +10,11 @@ namespace eval ::dasbrain::channels {
 	if {![info exists channels]} {
 		variable channels [dict create]
 	}
-	if {![info exists on-join]} {
-		variable on-join [list]
+	if {![info exists events]} {
+		variable events [dict create]
 	}
-	if {![info exists on-djoin]} {
-		variable on-djoin [list]
-	}
-	if {![info exists on-userchg]} {
-		variable on-userchg [list]
+	if {![info exists auth-provider]} {
+		variable auth-provider {}
 	}
 	if {![info exists join_hook]} {
 		variable join_hook [::hexchat::hook_server JOIN ::dasbrain::channels::JOIN]
@@ -60,62 +57,28 @@ namespace eval ::dasbrain::channels {
 	}
 	nopt register account-host-regexp string {}
 	::dasbrain::modeparse::handler ::dasbrain::channels::mode-change
-	namespace export on-join on-djoin on-userchg
+	namespace export on-event userrec userlist chanmodes meop
 }
 
-proc ::dasbrain::channels::on-join {cmd} {
-	variable on-join
-	if {$cmd ni ${on-join}} {
-		lappend on-join $cmd
+proc ::dasbrain::channels::on-event {event cmd} {
+	variable events
+	if {![dict exists $events $event] || $cmd ni [dict get $events $event]} {
+		dict lappend events $event $cmd
 	}
 }
 
-proc ::dasbrain::channels::on-djoin {cmd} {
-	variable on-djoin
-	if {$cmd ni ${on-djoin}} {
-		lappend on-djoin $cmd
-	}
-}
-
-proc ::dasbrain::channels::on-userchg {cmd} {
-	variable on-userchg
-	if {$cmd ni ${on-userchg}} {
-		lappend on-userchg $cmd
-	}
-}
-
-proc ::dasbrain::channels::emit-join {chan userrec} {
-	variable on-join
-	foreach h ${on-join} {
+proc ::dasbrain::channels::emit-event {event args} {
+	variable events
+	if {![dict exists $events $event]} {return}
+	foreach h [dict get $events $event] {
 		try {
-			{*}$h $chan $userrec
+			{*}$h {*}$args
 		} on error {- opt} {
-			::hexchat::print "JOIN $h $chan $userrec\t[dict get $opt -errorinfo]"
+			::hexchat::print "$event $h $args\t[dict get $opt -errorinfo]"
 		}
 	}
 }
 
-proc ::dasbrain::channels::emit-djoin {chan userrec} {
-	variable on-djoin
-	foreach h ${on-djoin} {
-		try {
-			{*}$h $chan $userrec
-		} on error {- opt} {
-			::hexchat::print "DJOIN $h $chan $userrec\t[dict get $opt -errorinfo]"
-		}
-	}
-}
-
-proc ::dasbrain::channels::emit-userchg {chan userrec} {
-	variable on-userchg
-	foreach h ${on-userchg} {
-		try {
-			{*}$h $chan $userrec
-		} on error {- opt} {
-			::hexchat::print "USERCHG $h $chan $userrec\t[dict get $opt -errorinfo]"
-		}
-	}
-}
 
 proc ::dasbrain::channels::nuh2nick {nuh} {
 	set bangidx [string first ! $nuh]
@@ -126,13 +89,30 @@ proc ::dasbrain::channels::nuh2nick {nuh} {
 	}
 }
 
+proc ::dasbrain::channels::do-auth {chan userrec} {
+	variable auth-provider
+	if {${auth-provider} eq {}} {
+		set handle *
+		set caps [list]
+	} else {
+		lassign [{*}${auth-provider} $chan $userrec] handle caps
+	}
+	variable channels
+	set sid [::hexchat::prefs id]
+	dict set channels $sid $chan users [dict get $userrec nick] handle $handle
+	dict set channels $sid $chan users [dict get $userrec nick] caps $caps
+	if {![dict exists $userrec handle] || [dict get $userrec handle] ne $handle} {
+		emit-event chghandle $chan [dict get $channels $sid $chan users [dict get $userrec nick]]
+	}
+}
+
 
 proc ::dasbrain::channels::JOIN {word word_eol} {
 	set line [ircsplit [lindex $word_eol 1]]
 	set sid [::hexchat::prefs id]
 	set chan [lindex $line 2]
 	set from [lindex $line 0]
-	set userrec [dict create prefix [dict create] flags [dict create H {}] jointime [clock seconds]]
+	set userrec [dict create]
 	set bangidx [string first ! $from]
 	if {$bangidx != -1} {
 		set nick [string range $from 0 $bangidx-1]
@@ -144,9 +124,9 @@ proc ::dasbrain::channels::JOIN {word word_eol} {
 	if {[llength $line] >= 5} {
 		# extended join
 		dict set userrec account [lindex $line 3]
-		dict set userrec realname [lindex $line 4]
+		dict set userrec realname [lindex $line end]
 	} else {
-		set acchost [cnopt get account-host]
+		set acchost [cnopt get account-host-regexp]
 		if {$acchost ne {} && [regexp $acchost [dict get $userrec uhost] - account]} {
 			dict set userrec account $account
 		}
@@ -155,9 +135,15 @@ proc ::dasbrain::channels::JOIN {word word_eol} {
 	dict for {k v} $userrec {
 		dict set channels $sid $chan users $nick $k $v
 	}
-	emit-join $chan $userrec
+	dict for {k v} [dict create prefix [dict create] flags [dict create H 1] jointime [clock seconds]] {
+		if {![dict exists $channels $sid $chan users $nick $k]} {
+			dict set channels $sid $chan users $nick $k $v
+		}
+	}
+	do-auth $chan [dict get $channels $sid $chan users $nick]
+	emit-event join $chan $userrec
 	if {[llength $line] >= 5 && ![dict exists $channels $sid $chan users $nick djoin-done]} {
-		emit-djoin $chan $userrec
+		emit-event djoin $chan $userrec
 		dict set channels $sid $chan users $nick djoin-done 1
 	}
 	return $::hexchat::EAT_NONE
@@ -165,13 +151,16 @@ proc ::dasbrain::channels::JOIN {word word_eol} {
 
 proc ::dasbrain::channels::remuser {chan nick how reason src} {
 	variable channels
-	# TODO: add a hook
+	set sid [::hexchat::prefs id]
+	set userrec [dict get $channels $sid $chan users $nick]
+	emit-event preremove $chan $userrec $how $reason $src
 	if {[::hexchat::nickcmp $nick [::hexchat::getinfo nick]] == 0} {
 		# We leave.
-		dict unset channels [::hexchat::prefs id] $chan
+		dict unset channels $sid $chan
 	} else {
-		dict unset channels [::hexchat::prefs id] $chan users $nick
+		dict unset channels $sid $chan users $nick
 	}
+	emit-event postremove $chan $userrec $how $reason $src
 }
 
 proc ::dasbrain::channels::PART {word word_eol} {
@@ -230,6 +219,7 @@ proc ::dasbrain::channels::354 {word word_eol} {
 			if {$account eq {0}} {
 				set account *
 			}
+			set oldinfo [dict get $channels $sid $chan users $nick]
 			dict set channels $sid $chan users $nick uhost ${user}@${host}
 			dict set channels $sid $chan users $nick realname $realname
 			dict set channels $sid $chan users $nick account $account
@@ -244,8 +234,12 @@ proc ::dasbrain::channels::354 {word word_eol} {
 				}
 			}
 			dict set channels $sid $chan users $nick flags $nflags
+			if {![dict exists $oldinfo account] || [dict get $oldinfo account] ne $account ||
+				![dict exists $oldinfo uhost] || [dict get $oldinfo uhost] ne "${user}@${host}"} {
+				do-auth $chan [dict get $channels $sid $chan users $nick]
+			}
 			if {![dict exists $channels $sid $chan users $nick djoin-done]} {
-				emit-djoin $chan [dict get $channels $sid $chan users $nick]
+				emit-event djoin $chan [dict get $channels $sid $chan users $nick]
 				dict set $sid $chan users $nick djoin-done 1
 			}
 			return $::hexchat::EAT_NONE
@@ -280,7 +274,7 @@ proc ::dasbrain::channels::352 {word word_eol} {
 	}
 	dict set channels $sid $chan users $nick flags $nflags
 	if {![dict exists $channels $sid $chan users $nick djoin-done]} {
-		emit-djoin $chan [dict get $channels $sid $chan users $nick]
+		emit-event djoin $chan [dict get $channels $sid $chan users $nick]
 		dict set $sid $chan users $nick djoin-done 1
 	}
 	return $::hexchat::EAT_NONE
@@ -323,7 +317,7 @@ proc ::dasbrain::channels::ACCOUNT {word word_eol} {
 	dict for {chan info} [dict get $channels $sid] {
 		if {[dict exists $info users $nick]} {
 			dict set channels $sid $chan users $nick account $account
-			emit-userchg $chan [dict get $channels $sid $chan users $nick]
+			emit-event userchg $chan [dict get $channels $sid $chan users $nick]
 		}
 	}
 	return $::hexchat::EAT_NONE
@@ -366,7 +360,7 @@ proc ::dasbrain::channels::CHGHOST {word word_eol} {
 	dict for {chan info} [dict get $channels $sid] {
 		if {[dict exists $info users $nick]} {
 			dict set channels $sid $chan users $nick uhost $newuhost
-			emit-userchg $chan [dict get $channels $sid $chan users $nick]
+			emit-event userchg $chan [dict get $channels $sid $chan users $nick]
 		}
 	}
 	return $::hexchat::EAT_NONE
@@ -392,61 +386,82 @@ proc ::dasbrain::channels::324 {word word_eol} {
 		if {$mc in {+ -}} {
 			set pm $mc
 		} elseif {$mc in $A} {
-			::hexchat::print "channels\tWarning: List-Mode $mc in 324 nummeric, ignoring"
+			::hexchat::print "channels\tWarning: List-Mode $mc in 324 numeric, ignoring"
 		} elseif {$mc in $B || $mc in $C} {
 			set args [lassign $args param]
 			dict set chanmodes $mc $param
 		} elseif {$mc in $D} {
 			dict set chanmodes $mc 1
 		} else {
-			::hexchat::print "channels\tWarning: Unknown mode $mc in 324 nummeric, assuming no parameter"
+			::hexchat::print "channels\tWarning: Unknown mode $mc in 324 numeric, assuming no parameter"
 			dict set chanmodes $mc 1
 		}
 	}
 	if {[llength $args] > 0} {
-		::hexchat::print "channels\tWarning: Non-consumed arguments [list $args] in 324 nummeric, ignoring"
+		::hexchat::print "channels\tWarning: Non-consumed arguments [list $args] in 324 numeric, ignoring"
 	}
 	variable channels
 	dict set channels [::hexchat::prefs id] $chan mode $chanmodes
 	return $::hexchat::EAT_NONE
 }
 
-proc ::dasbrain::channels::mode-change {from chan mode arg} {
-	set chanmodes [split [isupport get CHANMODES] ,]
-	foreach cms $chanmodes type {A B C D} {
-		set $type [split $cms {}]
-	}
-	set prefixmodes [isupport get PREFIX]
-	set prefixpos [string first ) $prefixmodes]
-	set prefixchars [split [string range $prefixmodes $prefixpos+1 end] {}]
-	set prefixmodes [split [string range $prefixmodes 1 $prefixpos-1] {}]
-	
+proc ::dasbrain::channels::mode-change {from chan mode arg type} {
 	set pm [string index $mode 0]
 	set mc [string index $mode 1]
 	variable channels
-	if {$mc in $A} {
-		# Ignore
-	} elseif {$mc in $B || $mc in $C} {
-		if {$pm eq {+}} {
-			dict set channels [::hexchat::prefs id] $chan mode $mc $arg
-		} else {
-			dict unset channels [::hexchat::prefs id] $chan mode $mc
+	switch -exact -- $type {
+		A {
+			# We ignore list modes for now.
+			return
 		}
-	} elseif {$mc in $prefixmodes} {
-		set pc [lindex $prefixchars [lsearch $prefixmodes $mc]]
-		if {$pm eq {+}} {
-			dict set channels [::hexchat::prefs id] $chan users $arg prefix $pc 1
-		} else {
-			dict unset channels [::hexchat::prefs id] $chan users $arg prefix $pc
+		prefix {
+			set prefixmodes [isupport get PREFIX]
+			set prefixpos [string first ) $prefixmodes]
+			set prefixchars [split [string range $prefixmodes $prefixpos+1 end] {}]
+			set prefixmodes [split [string range $prefixmodes 1 $prefixpos-1] {}]
+			set pc [lindex $prefixchars [lsearch $prefixmodes $mc]]
+			if {$pm eq {+}} {
+				dict set channels [::hexchat::prefs id] $chan users $arg prefix $pc 1
+				if {[::hexchat::nickcmp $arg [::hexchat::getinfo nick]] == 0} {
+					# We got some status - yay.
+					if {[lsearch $prefixmodes $mc] <= [lsearch $prefixmodes o]} {
+						# We got op or higher
+						emit-event gotops $chan
+					}
+				}
+			} else {
+				dict unset channels [::hexchat::prefs id] $chan users $arg prefix $pc
+			}
 		}
-	} else {
-		# If not in type D, then modeparse already emitted a warning
-		if {$pm eq {+}} {
-			dict set channels [::hexchat::prefs id] $chan mode $mc 1
-		} else {
-			dict unset channels [::hexchat::prefs id] $chan mode $mc
+		default {
+			if {$pm eq {+}} {
+				dict set channels [::hexchat::prefs id] $chan mode $mc $arg
+			} else {
+				dict unset channels [::hexchat::prefs id] $chan mode $mc
+			}
 		}
 	}
+}
+
+proc ::dasbrain::channels::userlist {chan} {
+	variable channels
+	return [dict get $channels [::hexchat::prefs id] $chan users]
+}
+
+proc ::dasbrain::channels::chanmode {chan} {
+	variable channels
+	return [dict get $channels [::hexchat::prefs id] $chan mode]
+}
+
+proc ::dasbrain::channels::meop {chan} {
+	# TODO: Also allow modes other than +o return true?
+	variable channels
+	return [dict exists $channels [::hexchat::prefs id] $chan users [::hexchat::getinfo nick] prefix @]
+}
+
+proc ::dasbrain::channels::userrec {chan nick} {
+	variable channels
+	return [dict get $channels [::hexchat::prefs id] $chan users $nick]
 }
 
 apply {{} {
@@ -486,7 +501,10 @@ apply {{} {
 					dict set ur flags H 1
 				}
 				dict set ur uhost [lindex $u $uhostidx]
-				dict set ur prefix [lindex $u $prefixidx] 1
+				set prefix [lindex $u $prefixidx]
+				if {$prefix ne {}} {
+					dict set ur prefix $prefix 1
+				}
 				dict set ur realname [lindex $u $realnameidx]
 				
 				dict set channels $sid $channel users $nick $ur
