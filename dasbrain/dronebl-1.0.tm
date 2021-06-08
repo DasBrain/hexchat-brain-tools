@@ -53,7 +53,7 @@ proc ::dasbrain::dronebl::gotipv4-cb {sid chan userrec token} {
 	::dns::cleanup $token
 	if {[llength $addrs]} {
 		# Simply use the first address *shrug*
-		gotipv4 $sid $chan $userrec [lindex $addr 0]
+		gotipv4 $sid $chan $userrec [lindex $addrs 0]
 	}
 }
 
