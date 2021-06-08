@@ -55,7 +55,7 @@ catch {::dasbrain::matcher::base create ::dasbrain::matcher::realname}
 catch {::dasbrain::matcher::base create ::dasbrain::matcher::maskreal}
 ::oo::objdefine ::dasbrain::matcher::maskreal {
 	method matches {matcher userrec} {
-		if {![dict exists $userrec realname]} {return 0}
+		if {![dict exists $userrec realname] || ![dict exists $userrec uhost]} {return 0}
 		return [string match -nocase [dict get $matcher on] "[dict get $userrec nick]![dict get $userrec uhost]#[dict get $userrec realname]"]
 	}
 }

@@ -57,7 +57,7 @@ namespace eval ::dasbrain::channels {
 	}
 	nopt register account-host-regexp string {}
 	::dasbrain::modeparse::handler ::dasbrain::channels::mode-change
-	namespace export on-event userrec userlist chanmodes meop
+	namespace export on-event userrec userlist chanmodes meop seturec
 }
 
 proc ::dasbrain::channels::on-event {event cmd} {
@@ -462,6 +462,11 @@ proc ::dasbrain::channels::meop {chan} {
 proc ::dasbrain::channels::userrec {chan nick} {
 	variable channels
 	return [dict get $channels [::hexchat::prefs id] $chan users $nick]
+}
+
+proc ::dasbrain::channels::seturec {chan nick args} {
+	variable channels
+	dict set channels [::hexchat::prefs id] $chan users $nick {*}$args
 }
 
 apply {{} {
