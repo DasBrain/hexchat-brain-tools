@@ -149,9 +149,9 @@ proc ::dasbrain::channels::JOIN {word word_eol} {
 	# Remove delay-join flag if it exists
 	dict unset channels $sid $chan users $nick flags <
 	do-auth $chan [dict get $channels $sid $chan users $nick]
-	emit-event join $chan $userrec
+	emit-event join $chan [dict get $channels $sid $chan users $nick]
 	if {[llength $line] >= 5 && ![dict exists $channels $sid $chan users $nick djoin-done]} {
-		emit-event djoin $chan $userrec
+		emit-event djoin $chan [dict get $channels $sid $chan users $nick]
 		dict set channels $sid $chan users $nick djoin-done 1
 	}
 	return $::hexchat::EAT_NONE
@@ -476,7 +476,7 @@ proc ::dasbrain::channels::CHGHOST {word word_eol} {
 proc ::dasbrain::channels::Disconnected {word} {
 	variable channels
 	dict unset channels [::hexchat::prefs id]
-	return ::hexchat::EAT_NONE
+	return $::hexchat::EAT_NONE
 }
 
 #>> :tulip.eu.ix.undernet.org 324 DasBrain #computertech +mtnRl 33
