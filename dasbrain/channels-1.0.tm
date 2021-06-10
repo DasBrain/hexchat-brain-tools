@@ -40,6 +40,9 @@ namespace eval ::dasbrain::channels {
 	if {![info exists 353_hook]} {
 		variable 353_hook [::hexchat::hook_server 353 ::dasbrain::channels::353]
 	}
+	if {![info exists 315_hook]} {
+		variable 315_hook [::hexchat::hook_server 315 ::dasbrain::channels::315]
+	}
 	if {![info exists ACCOUNT_hook]} {
 		variable ACCOUNT_hook [::hexchat::hook_server ACCOUNT ::dasbrain::channels::ACCOUNT]
 	}
@@ -54,6 +57,9 @@ namespace eval ::dasbrain::channels {
 	}
 	if {![info exists 324_hook]} {
 		variable 324_hook [::hexchat::hook_server 324 ::dasbrain::channels::324]
+	}
+	if {![info exists djoin_timer]} {
+		variable djoin_timer [::hexchat::hook_timer 60000 ::dasbrain::channels::djoincheck]
 	}
 	nopt register account-host-regexp string {}
 	::dasbrain::modeparse::handler ::dasbrain::channels::mode-change
@@ -112,7 +118,7 @@ proc ::dasbrain::channels::JOIN {word word_eol} {
 	set sid [::hexchat::prefs id]
 	set chan [lindex $line 2]
 	set from [lindex $line 0]
-	set userrec [dict create]
+	set userrec [dict create gotjoin 1]
 	set bangidx [string first ! $from]
 	if {$bangidx != -1} {
 		set nick [string range $from 0 $bangidx-1]
@@ -140,6 +146,8 @@ proc ::dasbrain::channels::JOIN {word word_eol} {
 			dict set channels $sid $chan users $nick $k $v
 		}
 	}
+	# Remove delay-join flag if it exists
+	dict unset channels $sid $chan users $nick flags <
 	do-auth $chan [dict get $channels $sid $chan users $nick]
 	emit-event join $chan $userrec
 	if {[llength $line] >= 5 && ![dict exists $channels $sid $chan users $nick djoin-done]} {
@@ -196,6 +204,7 @@ proc ::dasbrain::channels::NICK {word word_eol} {
 	set newnick [lindex $line 2]
 	variable channels
 	set sid [::hexchat::prefs id]
+	if {![dict exists $channels $sid]} {return}
 	dict for {chan info} [dict get $channels $sid] {
 		if {[dict exists $info users $nick]} {
 			dict set channels $sid $chan users $newnick [dict get $info users $nick]
@@ -219,6 +228,9 @@ proc ::dasbrain::channels::354 {word word_eol} {
 			if {$account eq {0}} {
 				set account *
 			}
+			if {![dict exists $channels $sid $chan users $nick]} {
+				dict set channels $sid $chan users $nick jointime [clock seconds]
+			}
 			set oldinfo [dict get $channels $sid $chan users $nick]
 			dict set channels $sid $chan users $nick uhost ${user}@${host}
 			dict set channels $sid $chan users $nick realname $realname
@@ -230,7 +242,7 @@ proc ::dasbrain::channels::354 {word word_eol} {
 				dict set nflags $c 1
 				if {$c eq {+}} {
 					# Special case + (voice), as quakenet/undernet doesn't have multi-prefix.
-					dict set $sid $chan users $nick prefix + 1
+					dict set channels $sid $chan users $nick prefix + 1
 				}
 			}
 			dict set channels $sid $chan users $nick flags $nflags
@@ -240,12 +252,107 @@ proc ::dasbrain::channels::354 {word word_eol} {
 			}
 			if {![dict exists $channels $sid $chan users $nick djoin-done]} {
 				emit-event djoin $chan [dict get $channels $sid $chan users $nick]
-				dict set $sid $chan users $nick djoin-done 1
+				dict set channels $sid $chan users $nick djoin-done 1
 			}
 			return $::hexchat::EAT_NONE
 		}
+		313 {
+			# see through delay-join query
+			lassign $line - - - - chan user host server nick flags account realname
+			variable channels
+			set sid [::hexchat::prefs id]
+			
+			if {![dict exists $channels $sid $chan wholist]} {
+				dict set channels $sid $chan wholist [dict create]
+				if {[dict exists $channels $sid $chan users]} {
+					dict for {k v} [dict get $channels $sid $chan users] {
+						dict set channels $sid $chan wholist $k 1
+					}
+				}
+			}
+			dict unset channels $sid $chan wholist $nick
+			
+			if {$account eq {0}} {
+				set account *
+			}
+			set nflags [dict create]
+			if {![dict exists $channels $sid $chan users $nick]} {
+				dict set channels $sid $chan users $nick jointime [clock seconds]
+				dict set nflags < 1
+			}
+			set oldinfo [dict get $channels $sid $chan users $nick]
+			dict set channels $sid $chan users $nick uhost ${user}@${host}
+			dict set channels $sid $chan users $nick realname $realname
+			dict set channels $sid $chan users $nick account $account
+			dict set channels $sid $chan users $nick server $server
+			dict set channels $sid $chan users $nick nick $nick
+
+			foreach c [split $flags {}] {
+				dict set nflags $c 1
+				if {$c eq {+}} {
+					# Special case + (voice), as quakenet/undernet doesn't have multi-prefix.
+					dict set channels $sid $chan users $nick prefix + 1
+				}
+			}
+			dict set channels $sid $chan users $nick flags $nflags
+			if {![dict exists $oldinfo account] || [dict get $oldinfo account] ne $account ||
+				![dict exists $oldinfo uhost] || [dict get $oldinfo uhost] ne "${user}@${host}"} {
+				do-auth $chan [dict get $channels $sid $chan users $nick]
+			}
+			if {![dict exists $channels $sid $chan users $nick djoin-done]} {
+				emit-event djoin $chan [dict get $channels $sid $chan users $nick]
+				dict set channels $sid $chan users $nick djoin-done 1
+			}
+			return $::hexchat::EAT_HEXCHAT
+		}
 	}
 	return $::hexchat::EAT_NONE
+}
+
+# >> :cymru.us.quakenet.org 315 DasBrain #giveaway :End of /WHO list.
+proc ::dasbrain::channels::315 {word word_eol} {
+	set line [ircsplit [lindex $word_eol 1]]
+	set chan [lindex $line 3]
+	set sid [::hexchat::prefs id]
+	variable channels
+	if {[dict exists $channels $sid $chan wholist]} {
+		dict for {k -} [dict get $channels $sid $chan wholist] {
+			if {![dict exists $channels $sid $chan users $k flags <]} {
+				::hexchat::print "WARNING\tUser left ${chan}? [list [dict get $channels $sid $chan users $k]]"
+			}
+			remuser $chan $k DJOIN-LEFT {} {}
+		}
+		dict unset channels $sid $chan wholist
+		emit-event dcheck $chan
+		return $::hexchat::EAT_HEXCHAT
+	}
+	return $::hexchat::EAT_NONE
+}
+
+proc ::dasbrain::channels::djoincheck {} {
+	variable channels
+	
+	set cfields [::hexchat::list_fields channels]
+	set ctxidx [lsearch $cfields context]
+	set ididx [lsearch $cfields id]
+	
+	set origctx [::hexchat::getcontext]
+	
+	dict for {sid chans} $channels {
+		dict for {chan cdict} $chans {
+			if {[dict exists $cdict mode D] || [dict exists $cdict mode d]} {
+				foreach cinfo [::hexchat::getlist channels] {
+					if {[lindex $cinfo $ididx] == $sid} {
+						::hexchat::setcontext [lindex $cinfo $ctxidx]
+						::hexchat::command "QUOTE WHO $chan d%chtsunfra,313"
+						break
+					}
+				}
+			}
+		}
+	}
+	::hexchat::setcontext $origctx
+	return 1
 }
 
 #<< WHO #YATC
@@ -269,13 +376,13 @@ proc ::dasbrain::channels::352 {word word_eol} {
 		dict set nflags $c 1
 		if {$c eq {+}} {
 			# Special case + (voice), as quakenet/undernet doesn't have multi-prefix.
-			dict set $sid $chan users $nick prefix + 1
+			dict set channels $sid $chan users $nick prefix + 1
 		}
 	}
 	dict set channels $sid $chan users $nick flags $nflags
 	if {![dict exists $channels $sid $chan users $nick djoin-done]} {
 		emit-event djoin $chan [dict get $channels $sid $chan users $nick]
-		dict set $sid $chan users $nick djoin-done 1
+		dict set channels $sid $chan users $nick djoin-done 1
 	}
 	return $::hexchat::EAT_NONE
 }
@@ -289,7 +396,7 @@ proc ::dasbrain::channels::353 {word word_eol} {
 	set prefixes [isupport get PREFIX]
 	set prefixes [split [string range $prefixes [string first ) $prefixes]+1 end] {}]
 	foreach u [split $users] {
-		set userrec [dict create]
+		set userrec [dict create gotjoin 1]
 		set bangidx [string first ! $u]
 		if {$bangidx != -1} {
 			# we have userhost-in-names
@@ -511,8 +618,13 @@ apply {{} {
 					dict set ur prefix $prefix 1
 				}
 				dict set ur realname [lindex $u $realnameidx]
+				dict set ur gotjoin 1
 				
-				dict set channels $sid $channel users $nick $ur
+				dict for {k v} $ur {
+					if {![dict exists $channels $sid $channel users $nick $k]} {
+						dict set channels $sid $channel users $nick $k $v
+					}
+				}
 			}
 		}
 	}

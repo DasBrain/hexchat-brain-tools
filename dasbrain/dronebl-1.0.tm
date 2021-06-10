@@ -7,6 +7,7 @@ package provide dasbrain::dronebl 1.0
 
 namespace eval ::dasbrain::dronebl {
 	::dasbrain::channels::on-event join ::dasbrain::dronebl::JOIN
+	::dasbrain::channels::on-event djoin ::dasbrain::dronebl::JOIN
 	::dasbrain::chanopt::register dronebl flag 0
 	
 	variable dronebl-classes {
@@ -36,14 +37,16 @@ namespace eval ::dasbrain::dronebl {
 
 proc ::dasbrain::dronebl::JOIN {chan userrec} {
 	if {![dict exists $userrec uhost]} {return}
+	if {[dict exists $userrec dronebl]} {return}
 	if {![ccopt get dronebl]} {return}
+	dict set ::dasbrain::channels::channels [::hexchat::prefs id] $chan users [dict get $userrec nick] dronebl 1
 	set addr [lindex [split [dict get $userrec uhost] @] 1]
 	if {[::ip::is ipv4 $addr]} {
 		gotipv4 [::hexchat::prefs id] $chan $userrec $addr
 	} elseif {[::ip::is ipv6 $addr]} {
 		# gotipv6 [::hexchat::prefs id] $chan $userrec $addr
 	} else {
-		::dns::resolve $addr -type A -command [list ::dasbrain::dronebl::gotipv4-cb [::hexchat::prefs id] $chan $userrec]
+		::dns::resolve $addr -type A -command [list ::dasbrain::dronebl::gotipv4-cb [::hexchat::prefs id] $chan $userrec] -protocol tcp
 		#::dns::resolve $addr -type AAAA -command [list ::dasbrain::dronebl::gotipv6-cb [::hexchat::prefs id] $chan $userrec]
 	}
 }
@@ -58,10 +61,12 @@ proc ::dasbrain::dronebl::gotipv4-cb {sid chan userrec token} {
 }
 
 proc ::dasbrain::dronebl::gotipv4 {sid chan userrec addr} {
-	dict set ::dasbrain::channels::channels $sid $chan users [dict get $userrec nick] ip $addr
+	if {[dict exists $::dasbrain::channels::channels $sid $chan users [dict get $userrec nick]]} {
+		dict set ::dasbrain::channels::channels $sid $chan users [dict get $userrec nick] ip $addr
+	}
 	dict set userrec ip $addr
 	set lookupaddr [join [lreverse [split $addr .]] .].dnsbl.dronebl.org
-	::dns::resolve $lookupaddr -type A -command [list ::dasbrain::dronebl::gotdbl-response $sid $chan $userrec]
+	::dns::resolve $lookupaddr -type A -command [list ::dasbrain::dronebl::gotdbl-response $sid $chan $userrec] -protocol tcp
 }
 
 
@@ -83,15 +88,26 @@ proc ::dasbrain::dronebl::gotdbl-response {sid chan userrec token} {
 	switch -exact -- [::dns::status $token] {
 		ok {
 			set addrs [::dns::address $token]
-			if {[llength $addrs] > 0 && [regexp {127.0.0.(.*)$} [lindex $addrs 0] - reason]} {
+			set reasons [list]
+			foreach addr $addrs {
+				if {[regexp {127.0.0.(.*)$} [lindex $addrs 0] - reason]} {
+					lappend reasons $reason
+				}
+			}
+			if {[llength $$reasons] > 0} {
 				variable dronebl-classes
-				set reason "[dict get ${dronebl-classes} $reason] ($reason)"
+				set reason "[dict get ${dronebl-classes} [lindex $reasons 0]] ([join $reasons /])"
 				set nick [dict get $userrec nick]
-				dict set ::dasbrain::channels::channels $sid $chan users $nick dronebl $reason
+				if {[dict exists $::dasbrain::channels::channels $sid $chan users $nick]} {
+					dict set ::dasbrain::channels::channels $sid $chan users $nick dronebl $reason
+				}
 				if {[::dasbrain::channels::meop $chan]} {
 					::hexchat::command "KICK $nick DRONEBL: $reason"
+					if {[dict exists $::dasbrain::channels::channels $sid $chan mode D]} {
+						::hexchat::print "DBL $nick\t$reason - kicked"
+					}
 				} else {
-					::hexchat::print "$nick/DRONEBL\t$reason"
+					::hexchat::print "DBL $nick\t$reason"
 				}
 			}
 		}
@@ -105,6 +121,7 @@ proc ::dasbrain::dronebl::gotdbl-response {sid chan userrec token} {
 				}
 			}
 		}
+		
 	}
 	::dns::cleanup $token
 }

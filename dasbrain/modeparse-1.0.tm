@@ -18,7 +18,7 @@ namespace eval ::dasbrain::modeparse {
 
 proc ::dasbrain::modeparse::parse {words words_eol} {
 
-	set chanmeta [isupport get CHANTYPES]
+	set chanmeta [split [isupport get CHANTYPES] {}]
 
 	set line [ircsplit [lindex $words_eol 1]]
 	# :src MODE #channel +o target
