@@ -55,7 +55,7 @@ proc ::dasbrain::modeparse::parse {words words_eol} {
 			set type B
 		} elseif {$c in $C} {
 			set take [string equal $plusminus +]
-			set type B
+			set type C
 		} elseif {$c in $D} {
 			set take 0
 			set type D

@@ -6,10 +6,10 @@ package require dasbrain::need
 package provide dasbrain::quakenet 1.0
 
 namespace eval ::dasbrain::quakenet {
-	::dasbrain::chanopt::register cs-invite flag 0
-	::dasbrain::chanopt::register cs-unban flag 0
-	::dasbrain::chanopt::register cs-voice flag 0
-	::dasbrain::chanopt::register cs-op flag 0
+	::dasbrain::chanopt::register q-invite flag 0
+	::dasbrain::chanopt::register q-unban flag 0
+	::dasbrain::chanopt::register q-voice flag 0
+	::dasbrain::chanopt::register q-op flag 0
 	
 	::dasbrain::need::handler ::dasbrain::quakenet::need
 }
@@ -19,6 +19,9 @@ proc ::dasbrain::quakenet::need {what channel} {
 		set what invite
 	}
 	if {[copt get [::hexchat::getinfo network] $channel q-$what] eq {1}} {
+		if {$what eq {unban}} {
+			set what unbanme
+		}
 		::hexchat::command "RAW PRIVMSG Q@CServe.quakenet.org :$what $channel"
 		if {$what eq {invite}} {
 			::dasbrain::invitejoin::addjoin $channel

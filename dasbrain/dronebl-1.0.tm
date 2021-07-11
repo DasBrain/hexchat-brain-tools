@@ -101,7 +101,7 @@ proc ::dasbrain::dronebl::gotdbl-response {sid chan userrec token} {
 				if {[dict exists $::dasbrain::channels::channels $sid $chan users $nick]} {
 					dict set ::dasbrain::channels::channels $sid $chan users $nick dronebl $reason
 				}
-				if {[::dasbrain::channels::meop $chan]} {
+				if {[::dasbrain::channels::meop $chan] && [dict exists $::dasbrain::channels::channels $sid $chan users $nick]} {
 					::hexchat::command "KICK $nick DRONEBL: $reason"
 					if {[dict exists $::dasbrain::channels::channels $sid $chan mode D]} {
 						::hexchat::print "DBL $nick\t$reason - kicked"
